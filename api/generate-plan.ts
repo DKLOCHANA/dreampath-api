@@ -232,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ],
             response_format: { type: 'json_object' },
             temperature: 0.7,
-            max_tokens: 4000,
+            max_tokens: 16000,
         });
 
         const content = completion.choices[0]?.message?.content;
@@ -398,15 +398,15 @@ REQUIRED JSON OUTPUT SCHEMA
             "keyActivities": ["activity1", "activity2", "activity3"],
             "tasks": [
                 {
-                    "title": "Specific, actionable task",
-                    "description": "Clear instructions on what to do",
-                    "estimatedMinutes": <15-120, fitting daily availability>,
+                    "title": "Specific, actionable task title (max 60 chars)",
+                    "description": "DETAILED description with: 1) Exact steps to follow 2) Resources/tools to use 3) Expected outcome 4) Tips to avoid common mistakes. Minimum 100 words.",
+                    "estimatedMinutes": <15-90, multiple tasks should fill daily ${user.timeAvailability.dailyAvailableHours * 60} minutes>,
                     "priority": "HIGH|MEDIUM|LOW",
                     "difficulty": "EASY|MEDIUM|HARD",
                     "category": "LEARNING|ACTION|PLANNING|REVIEW|PRACTICE|NETWORKING",
-                    "dayOfWeek": <1-7, Monday=1>,
+                    "dayOfWeek": <1-7, Monday=1, EVERY day must have tasks>,
                     "weekNumber": 1,
-                    "tips": "Optional helpful tip"
+                    "tips": "Practical advice, shortcuts, or motivation (REQUIRED)"
                 }
             ]
         }
@@ -435,17 +435,62 @@ REQUIRED JSON OUTPUT SCHEMA
 GENERATION RULES
 ═══════════════════════════════════════════════════════════════
 1. Create exactly ${numMilestones} milestones spread across ${weeksUntilTarget} weeks
-2. Each milestone should have 4-6 specific tasks
-3. Tasks should fit within ${user.timeAvailability.dailyAvailableHours} hours per day
-4. Distribute tasks across all 7 days of each week
-5. Start with easier tasks in week 1, gradually increase difficulty
-6. Include variety: mix of learning, practice, and action tasks
-7. Address user's challenges with specific mitigations
-8. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free/low-cost resources'}
-9. Task difficulty should match "${user.skills?.experienceLevel || 'beginner'}" level
-10. Include 2-3 "quick wins" achievable in the first week
-11. Each milestone target date should be a real date between now and ${targetDate.toISOString().split('T')[0]}
-12. Make motivational message personal and reference their specific goal
+2. EVERY SINGLE DAY must have tasks - no empty days allowed
+3. Each day MUST have enough tasks to fill ${user.timeAvailability.dailyAvailableHours * 60} minutes (${user.timeAvailability.dailyAvailableHours} hours)
+4. If a task takes 30 minutes and user has 2 hours, include 4 tasks for that day
+5. Calculate: Total daily minutes = ${user.timeAvailability.dailyAvailableHours * 60}. Sum of all task estimatedMinutes for each day should equal or be close to this
+6. Start with easier tasks in week 1, gradually increase difficulty
+7. Include variety: mix of learning, practice, and action tasks
+8. Address user's challenges with specific mitigations
+9. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free/low-cost resources'}
+10. Task difficulty should match "${user.skills?.experienceLevel || 'beginner'}" level
+11. Include 2-3 "quick wins" achievable in the first week
+12. Each milestone target date should be a real date between now and ${targetDate.toISOString().split('T')[0]}
+13. Make motivational message personal and reference their specific goal
+
+═══════════════════════════════════════════════════════════════
+CRITICAL TASK REQUIREMENTS
+═══════════════════════════════════════════════════════════════
+DAILY COVERAGE:
+- User has ${user.timeAvailability.dailyAvailableHours} hours (${user.timeAvailability.dailyAvailableHours * 60} minutes) per day
+- EVERY day (1-7) of EVERY week must have tasks
+- Total task time per day should use 80-100% of available time
+- Example: If user has 2 hours/day, each day needs tasks totaling 90-120 minutes
+
+TASK DESCRIPTIONS MUST BE DETAILED:
+Each task description should include:
+- Exactly WHAT to do (step-by-step if needed)
+- HOW to do it (specific method, tool, or approach)
+- WHERE to find resources (websites, apps, books if applicable)
+- EXPECTED OUTCOME (what success looks like)
+- COMMON MISTAKES to avoid
+
+Example of a GOOD detailed task:
+{
+    "title": "Complete Python Basics Tutorial - Variables & Data Types",
+    "description": "Step 1: Go to codecademy.com or freecodecamp.org and navigate to Python basics course. Step 2: Complete the 'Variables and Data Types' module. Step 3: Practice by creating a file called 'practice.py' and declare 5 different variables (string, int, float, bool, list). Step 4: Print each variable with its type using type() function. Expected outcome: You should be able to create variables of any type without looking at documentation. Common mistake: Don't forget that Python is case-sensitive - 'Name' and 'name' are different variables.",
+    "estimatedMinutes": 45,
+    ...
+}
+
+Example of a BAD task (too vague - DO NOT DO THIS):
+{
+    "title": "Learn Python basics",
+    "description": "Study Python fundamentals",
+    "estimatedMinutes": 30,
+    ...
+}
+
+TASK DISTRIBUTION PER DAY:
+- Each weekNumber + dayOfWeek combination must have multiple tasks if individual tasks are short
+- For ${user.timeAvailability.dailyAvailableHours} hours/day: aim for ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 30)} to ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 45)} tasks per day
+- Tasks can range from 15 to 90 minutes each
+- Larger tasks (60-90 min) can be standalone, smaller tasks must be grouped
+
+TIPS FIELD:
+- Every task MUST have a "tips" field
+- Include practical advice, shortcuts, or motivation
+- Reference specific resources when helpful
 
 CRITICAL: Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON structure.`;
 }
