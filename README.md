@@ -32,6 +32,7 @@ npm run dev
 ```
 
 Test the API:
+
 - Health check: `http://localhost:3000/api/health`
 - Generate plan: `POST http://localhost:3000/api/generate-plan`
 
@@ -66,12 +67,13 @@ vercel --prod
 Health check endpoint.
 
 **Response:**
+
 ```json
 {
-    "status": "ok",
-    "service": "DreamPath API",
-    "version": "1.0.0",
-    "timestamp": "2026-02-02T10:00:00.000Z"
+  "status": "ok",
+  "service": "DreamPath API",
+  "version": "1.0.0",
+  "timestamp": "2026-02-02T10:00:00.000Z"
 }
 ```
 
@@ -80,18 +82,20 @@ Health check endpoint.
 Generate an AI-powered goal plan.
 
 **Request Body:**
+
 ```json
 {
-    "goal": "Become a software developer",
-    "targetDate": "2026-06-01",
-    "currentSituation": "Currently working in retail, have some basic coding knowledge",
-    "budget": 500,
-    "hoursPerDay": 2,
-    "skills": ["HTML", "Basic JavaScript"]
+  "goal": "Become a software developer",
+  "targetDate": "2026-06-01",
+  "currentSituation": "Currently working in retail, have some basic coding knowledge",
+  "budget": 500,
+  "hoursPerDay": 2,
+  "skills": ["HTML", "Basic JavaScript"]
 }
 ```
 
 **Response:**
+
 ```json
 {
     "success": true,
@@ -115,6 +119,7 @@ Generate an AI-powered goal plan.
 ## Cost Estimation
 
 Using GPT-4o-mini:
+
 - Input: ~$0.00015 per 1K tokens
 - Output: ~$0.0006 per 1K tokens
 - Average request: ~$0.002 per plan generation
