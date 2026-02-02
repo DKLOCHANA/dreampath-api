@@ -6,45 +6,153 @@ const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Types for the request
-interface GoalRequest {
-    goal: string;
-    targetDate: string;
-    currentSituation?: string;
-    budget?: number;
-    hoursPerDay?: number;
-    skills?: string[];
-    userId?: string;
+// ═══════════════════════════════════════════════════════════════
+// TYPE DEFINITIONS - Matching DreamPath Domain Entities
+// ═══════════════════════════════════════════════════════════════
+
+// User Profile (from onboarding)
+interface UserProfile {
+    age?: number;
+    occupation?: string;
+    educationLevel?: string;
 }
 
-interface Task {
+interface UserFinances {
+    monthlyBudget?: number;
+    currency?: string;
+}
+
+interface UserTime {
+    dailyAvailableHours: number;
+    preferredTimeSlots?: string[];
+    busyDays?: string[];
+}
+
+interface UserSkills {
+    experienceLevel: 'beginner' | 'intermediate' | 'advanced';
+    existingSkills?: string[];
+    learningInterests?: string[];
+}
+
+interface UserChallenges {
+    selected: string[];
+    custom?: string;
+}
+
+// Goal Input (from goal creation wizard)
+interface GoalInput {
+    title: string;
+    description?: string;
+    category: 'CAREER' | 'HEALTH' | 'FINANCIAL' | 'EDUCATION' | 'PERSONAL' | 'RELATIONSHIP' | 'OTHER';
+    priority: 'LOW' | 'MEDIUM' | 'HIGH';
+    startDate: string;
+    targetDate: string;
+}
+
+// Complete Request Body
+interface PlanGenerationRequest {
+    goal: GoalInput;
+    user: {
+        id?: string;
+        displayName?: string;
+        profile?: UserProfile;
+        finances?: UserFinances;
+        timeAvailability: UserTime;
+        skills: UserSkills;
+        challenges?: UserChallenges;
+    };
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESPONSE TYPES - What ChatGPT Returns
+// ═══════════════════════════════════════════════════════════════
+
+interface GeneratedTask {
     title: string;
     description: string;
     estimatedMinutes: number;
-    category: 'learning' | 'practice' | 'networking' | 'preparation' | 'application';
-    priority: 'high' | 'medium' | 'low';
-    week: number;
-    day: number;
+    priority: 'HIGH' | 'MEDIUM' | 'LOW';
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
+    category: 'LEARNING' | 'ACTION' | 'PLANNING' | 'REVIEW' | 'PRACTICE' | 'NETWORKING';
+    dayOfWeek: number; // 1-7 (Monday-Sunday)
+    weekNumber: number;
+    tips?: string;
 }
 
-interface Milestone {
+interface GeneratedMilestone {
+    order: number;
     title: string;
     description: string;
+    targetDate: string; // ISO date
     weekNumber: number;
-    tasks: Task[];
+    keyActivities: string[];
+    tasks: GeneratedTask[];
+}
+
+interface GeneratedRisk {
+    risk: string;
+    likelihood: 'LOW' | 'MEDIUM' | 'HIGH';
+    mitigation: string;
 }
 
 interface GeneratedPlan {
+    planSummary: string;
     goalTitle: string;
     goalDescription: string;
+    difficultyScore: number; // 1-10
+    difficultyExplanation: string;
     totalWeeks: number;
-    milestones: Milestone[];
     weeklyHoursRequired: number;
-    successProbability: number;
-    tips: string[];
+    successProbability: number; // 0.5-0.95
+    keySuccessFactors: string[];
+    milestones: GeneratedMilestone[];
+    risks: GeneratedRisk[];
+    resourceRequirements: {
+        timeInvestment: string;
+        financialInvestment: string;
+        toolsNeeded: string[];
+        skillsToDevelop: string[];
+    };
+    quickWins: string[];
+    motivationalMessage: string;
 }
 
-// CORS handler
+// ═══════════════════════════════════════════════════════════════
+// SYSTEM PROMPT - DreamPath AI Personality
+// ═══════════════════════════════════════════════════════════════
+
+const SYSTEM_PROMPT = `You are DreamPath AI, an expert life coach and strategic planner with 20+ years of experience helping people achieve ambitious goals.
+
+YOUR ROLE:
+- Analyze goals and create realistic, achievable action plans
+- Break down large goals into manageable milestones and daily tasks
+- Consider user's unique circumstances (time, money, skills, constraints)
+- Be motivating but realistic - never overpromise
+
+YOUR STYLE:
+- Clear, actionable language
+- Supportive but honest
+- Practical over theoretical
+- Specific over vague
+
+OUTPUT RULES:
+- Always return valid JSON (no markdown, no explanations outside JSON)
+- Include all required fields as specified in the schema
+- Use ISO 8601 date format (YYYY-MM-DD)
+- Task times should fit within user's daily availability
+- Be realistic about what can be achieved
+
+CONSTRAINTS TO RESPECT:
+- Never suggest more hours than user's stated availability
+- Consider financial limitations in recommendations
+- Account for user's current skill/experience level
+- Factor in known challenges and provide mitigation strategies
+- Adjust task difficulty based on experience level`;
+
+// ═══════════════════════════════════════════════════════════════
+// CORS HANDLER
+// ═══════════════════════════════════════════════════════════════
+
 function handleCors(req: VercelRequest, res: VercelResponse): boolean {
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -58,6 +166,10 @@ function handleCors(req: VercelRequest, res: VercelResponse): boolean {
     return false;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// MAIN HANDLER
+// ═══════════════════════════════════════════════════════════════
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Handle CORS preflight
     if (handleCors(req, res)) return;
@@ -68,43 +180,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        const body: GoalRequest = req.body;
+        const body: PlanGenerationRequest = req.body;
 
-        // Validate required fields
-        if (!body.goal || !body.targetDate) {
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDATION
+        // ═══════════════════════════════════════════════════════════════
+        
+        if (!body.goal?.title || !body.goal?.targetDate) {
             return res.status(400).json({ 
-                error: 'Missing required fields: goal and targetDate are required' 
+                error: 'Missing required fields: goal.title and goal.targetDate are required' 
             });
         }
 
-        // Calculate weeks until target
-        const now = new Date();
-        const target = new Date(body.targetDate);
-        const weeksUntilTarget = Math.ceil((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 7));
-
-        if (weeksUntilTarget < 1) {
-            return res.status(400).json({ error: 'Target date must be in the future' });
+        if (!body.user?.timeAvailability?.dailyAvailableHours) {
+            return res.status(400).json({ 
+                error: 'Missing required field: user.timeAvailability.dailyAvailableHours' 
+            });
         }
 
-        // Build the prompt
-        const prompt = buildPrompt(body, weeksUntilTarget);
+        // Calculate timeline
+        const now = new Date();
+        const startDate = body.goal.startDate ? new Date(body.goal.startDate) : now;
+        const targetDate = new Date(body.goal.targetDate);
+        
+        const daysUntilTarget = Math.ceil((targetDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+        const weeksUntilTarget = Math.ceil(daysUntilTarget / 7);
 
-        // Call ChatGPT
+        if (daysUntilTarget < 7) {
+            return res.status(400).json({ error: 'Target date must be at least 1 week in the future' });
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // BUILD PROMPT
+        // ═══════════════════════════════════════════════════════════════
+        
+        const prompt = buildComprehensivePrompt(body, daysUntilTarget, weeksUntilTarget, targetDate);
+
+        // Log for debugging (remove in production)
+        console.log('[generate-plan] Processing request for goal:', body.goal.title);
+        console.log('[generate-plan] Timeline:', daysUntilTarget, 'days /', weeksUntilTarget, 'weeks');
+
+        // ═══════════════════════════════════════════════════════════════
+        // CALL OPENAI
+        // ═══════════════════════════════════════════════════════════════
+        
         const completion = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
-                {
-                    role: 'system',
-                    content: `You are DreamPath AI, an expert life coach and goal planning assistant. 
-You create detailed, actionable plans to help people achieve their goals.
-Always respond with valid JSON matching the exact schema provided.
-Be realistic about timelines and requirements.
-Break down goals into weekly milestones with specific daily tasks.`
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
+                { role: 'system', content: SYSTEM_PROMPT },
+                { role: 'user', content: prompt }
             ],
             response_format: { type: 'json_object' },
             temperature: 0.7,
@@ -117,92 +241,260 @@ Break down goals into weekly milestones with specific daily tasks.`
             throw new Error('No response from ChatGPT');
         }
 
-        const plan: GeneratedPlan = JSON.parse(content);
+        // ═══════════════════════════════════════════════════════════════
+        // PARSE & VALIDATE RESPONSE
+        // ═══════════════════════════════════════════════════════════════
+        
+        const plan = parseAndValidateResponse(content);
 
-        // Return the generated plan
+        // ═══════════════════════════════════════════════════════════════
+        // RETURN SUCCESS RESPONSE
+        // ═══════════════════════════════════════════════════════════════
+        
         return res.status(200).json({
             success: true,
             plan,
+            metadata: {
+                generatedAt: new Date().toISOString(),
+                daysUntilTarget,
+                weeksUntilTarget,
+                model: 'gpt-4o-mini',
+            },
             usage: {
                 promptTokens: completion.usage?.prompt_tokens,
                 completionTokens: completion.usage?.completion_tokens,
                 totalTokens: completion.usage?.total_tokens,
+                estimatedCost: estimateCost(
+                    completion.usage?.prompt_tokens || 0,
+                    completion.usage?.completion_tokens || 0
+                ),
             }
         });
 
     } catch (error: any) {
-        console.error('Error generating plan:', error);
+        console.error('[generate-plan] Error:', error);
 
+        // Handle specific OpenAI errors
         if (error.code === 'insufficient_quota') {
             return res.status(503).json({ 
-                error: 'AI service temporarily unavailable. Please try again later.' 
+                error: 'AI service temporarily unavailable. Please try again later.',
+                code: 'QUOTA_EXCEEDED'
+            });
+        }
+
+        if (error.code === 'rate_limit_exceeded') {
+            return res.status(429).json({ 
+                error: 'Too many requests. Please wait a moment and try again.',
+                code: 'RATE_LIMITED'
             });
         }
 
         return res.status(500).json({ 
-            error: error.message || 'Failed to generate plan' 
+            error: error.message || 'Failed to generate plan',
+            code: 'GENERATION_ERROR'
         });
     }
 }
 
-function buildPrompt(body: GoalRequest, weeksUntilTarget: number): string {
-    const { goal, currentSituation, budget, hoursPerDay, skills } = body;
+// ═══════════════════════════════════════════════════════════════
+// PROMPT BUILDER - Comprehensive & Structured
+// ═══════════════════════════════════════════════════════════════
 
-    let prompt = `Create a detailed plan to achieve this goal:
+function buildComprehensivePrompt(
+    body: PlanGenerationRequest, 
+    daysUntilTarget: number, 
+    weeksUntilTarget: number,
+    targetDate: Date
+): string {
+    const { goal, user } = body;
+    
+    // Determine number of milestones based on timeline
+    const numMilestones = Math.min(Math.max(weeksUntilTarget, 3), 8);
+    
+    // Calculate experience multiplier for task difficulty
+    const experienceMultiplier = {
+        'beginner': 'Start with fundamentals, include more learning tasks, break complex activities into smaller steps',
+        'intermediate': 'Balance learning with practice, include moderate challenges, build on existing knowledge',
+        'advanced': 'Focus on optimization and mastery, include stretch goals, emphasize efficiency',
+    }[user.skills?.experienceLevel || 'beginner'];
 
-GOAL: ${goal}
-TIMEFRAME: ${weeksUntilTarget} weeks
-HOURS AVAILABLE PER DAY: ${hoursPerDay || 2} hours`;
+    // Build challenges section
+    const challengesSection = user.challenges?.selected?.length 
+        ? `Known Challenges: ${user.challenges.selected.join(', ')}${user.challenges.custom ? `, ${user.challenges.custom}` : ''}`
+        : 'No specific challenges mentioned';
 
-    if (currentSituation) {
-        prompt += `\nCURRENT SITUATION: ${currentSituation}`;
-    }
+    // Build skills section
+    const skillsSection = user.skills?.existingSkills?.length
+        ? `Existing Skills: ${user.skills.existingSkills.join(', ')}`
+        : 'No specific skills mentioned';
 
-    if (budget) {
-        prompt += `\nBUDGET: $${budget}`;
-    }
+    return `Create a comprehensive, personalized action plan for achieving this goal.
 
-    if (skills && skills.length > 0) {
-        prompt += `\nEXISTING SKILLS: ${skills.join(', ')}`;
-    }
+═══════════════════════════════════════════════════════════════
+GOAL INFORMATION
+═══════════════════════════════════════════════════════════════
+Title: ${goal.title}
+Description: ${goal.description || 'No additional description provided'}
+Category: ${goal.category}
+Priority: ${goal.priority}
+Start Date: ${goal.startDate || new Date().toISOString().split('T')[0]}
+Target Date: ${goal.targetDate}
+Timeline: ${daysUntilTarget} days (${weeksUntilTarget} weeks)
 
-    prompt += `
+═══════════════════════════════════════════════════════════════
+USER PROFILE
+═══════════════════════════════════════════════════════════════
+${user.displayName ? `Name: ${user.displayName}` : ''}
+${user.profile?.age ? `Age: ${user.profile.age}` : ''}
+${user.profile?.occupation ? `Occupation: ${user.profile.occupation}` : ''}
+${user.profile?.educationLevel ? `Education: ${user.profile.educationLevel}` : ''}
 
-Respond with a JSON object matching this exact schema:
+═══════════════════════════════════════════════════════════════
+TIME AVAILABILITY
+═══════════════════════════════════════════════════════════════
+Daily Hours Available: ${user.timeAvailability.dailyAvailableHours} hours
+${user.timeAvailability.preferredTimeSlots?.length ? `Preferred Times: ${user.timeAvailability.preferredTimeSlots.join(', ')}` : ''}
+${user.timeAvailability.busyDays?.length ? `Busy Days: ${user.timeAvailability.busyDays.join(', ')}` : ''}
+Weekly Commitment Capacity: ${user.timeAvailability.dailyAvailableHours * 7} hours maximum
+
+═══════════════════════════════════════════════════════════════
+FINANCIAL CONTEXT
+═══════════════════════════════════════════════════════════════
+${user.finances?.monthlyBudget ? `Monthly Budget: ${user.finances.currency || '$'}${user.finances.monthlyBudget}` : 'Budget: Flexible / Not specified'}
+
+═══════════════════════════════════════════════════════════════
+EXPERIENCE & SKILLS
+═══════════════════════════════════════════════════════════════
+Experience Level: ${user.skills?.experienceLevel || 'beginner'} 
+Strategy: ${experienceMultiplier}
+${skillsSection}
+${user.skills?.learningInterests?.length ? `Interested in Learning: ${user.skills.learningInterests.join(', ')}` : ''}
+
+═══════════════════════════════════════════════════════════════
+CHALLENGES & OBSTACLES
+═══════════════════════════════════════════════════════════════
+${challengesSection}
+
+═══════════════════════════════════════════════════════════════
+REQUIRED JSON OUTPUT SCHEMA
+═══════════════════════════════════════════════════════════════
 {
-    "goalTitle": "Short title for the goal",
-    "goalDescription": "Brief description of what will be achieved",
+    "planSummary": "2-3 sentence strategic overview of the approach",
+    "goalTitle": "Refined, action-oriented title",
+    "goalDescription": "Clear description of the end state",
+    "difficultyScore": <1-10 based on user context>,
+    "difficultyExplanation": "Why this difficulty level given user's situation",
     "totalWeeks": ${weeksUntilTarget},
-    "weeklyHoursRequired": <number>,
-    "successProbability": <number between 0.5 and 0.95>,
-    "tips": ["tip1", "tip2", "tip3"],
+    "weeklyHoursRequired": <realistic hours needed per week, max ${user.timeAvailability.dailyAvailableHours * 7}>,
+    "successProbability": <0.5-0.95 based on realistic assessment>,
+    "keySuccessFactors": ["factor1", "factor2", "factor3"],
     "milestones": [
         {
-            "title": "Milestone title",
+            "order": 1,
+            "title": "Action-oriented milestone title",
             "description": "What will be accomplished",
+            "targetDate": "YYYY-MM-DD",
             "weekNumber": 1,
+            "keyActivities": ["activity1", "activity2", "activity3"],
             "tasks": [
                 {
-                    "title": "Task title",
-                    "description": "Detailed task description",
-                    "estimatedMinutes": 30,
-                    "category": "learning",
-                    "priority": "high",
-                    "week": 1,
-                    "day": 1
+                    "title": "Specific, actionable task",
+                    "description": "Clear instructions on what to do",
+                    "estimatedMinutes": <15-120, fitting daily availability>,
+                    "priority": "HIGH|MEDIUM|LOW",
+                    "difficulty": "EASY|MEDIUM|HARD",
+                    "category": "LEARNING|ACTION|PLANNING|REVIEW|PRACTICE|NETWORKING",
+                    "dayOfWeek": <1-7, Monday=1>,
+                    "weekNumber": 1,
+                    "tips": "Optional helpful tip"
                 }
             ]
         }
-    ]
+    ],
+    "risks": [
+        {
+            "risk": "Potential obstacle",
+            "likelihood": "LOW|MEDIUM|HIGH",
+            "mitigation": "How to prevent or handle it"
+        }
+    ],
+    "resourceRequirements": {
+        "timeInvestment": "X hours per week",
+        "financialInvestment": "$X - $Y or 'None required'",
+        "toolsNeeded": ["tool1", "tool2"],
+        "skillsToDevelop": ["skill1", "skill2"]
+    },
+    "quickWins": [
+        "Something achievable in first 3 days",
+        "Another quick win to build momentum"
+    ],
+    "motivationalMessage": "Personalized encouragement based on user's goal and challenges"
 }
 
-Requirements:
-- Create ${Math.min(weeksUntilTarget, 8)} milestones (one per week, max 8)
-- Each milestone should have 3-5 specific tasks
-- Tasks should be actionable and specific
-- Distribute tasks across days of the week (1-7)
-- Categories: learning, practice, networking, preparation, application
-- Be realistic about what can be achieved in the timeframe`;
+═══════════════════════════════════════════════════════════════
+GENERATION RULES
+═══════════════════════════════════════════════════════════════
+1. Create exactly ${numMilestones} milestones spread across ${weeksUntilTarget} weeks
+2. Each milestone should have 4-6 specific tasks
+3. Tasks should fit within ${user.timeAvailability.dailyAvailableHours} hours per day
+4. Distribute tasks across all 7 days of each week
+5. Start with easier tasks in week 1, gradually increase difficulty
+6. Include variety: mix of learning, practice, and action tasks
+7. Address user's challenges with specific mitigations
+8. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free/low-cost resources'}
+9. Task difficulty should match "${user.skills?.experienceLevel || 'beginner'}" level
+10. Include 2-3 "quick wins" achievable in the first week
+11. Each milestone target date should be a real date between now and ${targetDate.toISOString().split('T')[0]}
+12. Make motivational message personal and reference their specific goal
 
-    return prompt;
+CRITICAL: Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON structure.`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// RESPONSE PARSER & VALIDATOR
+// ═══════════════════════════════════════════════════════════════
+
+function parseAndValidateResponse(content: string): GeneratedPlan {
+    // Clean the response
+    let cleaned = content.trim();
+
+    // Remove markdown code blocks if present
+    cleaned = cleaned.replace(/^```json\s*/i, '');
+    cleaned = cleaned.replace(/^```\s*/i, '');
+    cleaned = cleaned.replace(/\s*```$/i, '');
+
+    // Try to extract JSON if there's text before/after
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+        cleaned = jsonMatch[0];
+    }
+
+    // Parse JSON
+    const parsed = JSON.parse(cleaned);
+
+    // Basic validation
+    if (!parsed.planSummary || !Array.isArray(parsed.milestones) || parsed.milestones.length === 0) {
+        throw new Error('Invalid response structure: missing required fields');
+    }
+
+    // Validate each milestone has tasks
+    for (const milestone of parsed.milestones) {
+        if (!Array.isArray(milestone.tasks) || milestone.tasks.length === 0) {
+            throw new Error(`Milestone "${milestone.title}" has no tasks`);
+        }
+    }
+
+    return parsed as GeneratedPlan;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// COST ESTIMATOR
+// ═══════════════════════════════════════════════════════════════
+
+function estimateCost(inputTokens: number, outputTokens: number): string {
+    // GPT-4o-mini pricing (as of 2024)
+    const inputCost = (inputTokens / 1_000_000) * 0.15;  // $0.15 per 1M input tokens
+    const outputCost = (outputTokens / 1_000_000) * 0.60; // $0.60 per 1M output tokens
+    const total = inputCost + outputCost;
+    return `$${total.toFixed(4)}`;
 }
