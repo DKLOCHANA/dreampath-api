@@ -1,0 +1,17 @@
+{
+  "name": "dreampath-api",
+  "version": "1.0.0",
+  "description": "DreamPath API - ChatGPT proxy for goal generation",
+  "scripts": {
+    "dev": "vercel dev",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "openai": "^4.28.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3",
+    "vercel": "^28.18.5"
+  }
+}
