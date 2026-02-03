@@ -436,39 +436,48 @@ GENERATION RULES
 ═══════════════════════════════════════════════════════════════
 1. Create exactly ${numMilestones} milestones spread across ${weeksUntilTarget} weeks
 2. EVERY SINGLE DAY must have tasks - no empty days allowed
-3. Each day MUST have enough tasks to fill ${user.timeAvailability.dailyAvailableHours * 60} minutes (${user.timeAvailability.dailyAvailableHours} hours)
-4. If a task takes 30 minutes and user has 2 hours, include 4 tasks for that day
-5. Calculate: Total daily minutes = ${user.timeAvailability.dailyAvailableHours * 60}. Sum of all task estimatedMinutes for each day should equal or be close to this
-6. Start with easier tasks in week 1, gradually increase difficulty
-7. Include variety: mix of learning, practice, and action tasks
-8. Address user's challenges with specific mitigations
-9. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free/low-cost resources'}
-10. Task difficulty should match "${user.skills?.experienceLevel || 'beginner'}" level
-11. Include 2-3 "quick wins" achievable in the first week
-12. Each milestone target date should be a real date between now and ${targetDate.toISOString().split('T')[0]}
-13. Make motivational message personal and reference their specific goal
+3. Each day MUST contain enough tasks to fill approximately ${user.timeAvailability.dailyAvailableHours * 60} minutes (${user.timeAvailability.dailyAvailableHours} hours)
+4. Each day MUST include at least TWO tasks unless a single task uses 90-100% of the daily available time
+5. Calculate total daily minutes = ${user.timeAvailability.dailyAvailableHours * 60}. The sum of all task estimatedMinutes per day must fall between 80-100% of this value
+6. No single task may exceed 50% of the daily available time unless it is the only task for that day
+7. Start with easier tasks in week 1 and gradually increase difficulty over time
+8. Include variety each day: mix learning, practice, planning, and action tasks
+9. Address user challenges with explicit mitigation strategies inside tasks or tips
+10. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free or low-cost resources'}
+11. Task difficulty must align with the user's "${user.skills?.experienceLevel || 'beginner'}" level
+12. Include 2-3 quick wins achievable within the first week
+13. Each milestone target date must be a real date between today and ${targetDate.toISOString().split('T')[0]}
+14. Motivational message must reference the user's specific goal and challenges
 
 ═══════════════════════════════════════════════════════════════
 CRITICAL TASK REQUIREMENTS
 ═══════════════════════════════════════════════════════════════
 DAILY COVERAGE:
 - User has ${user.timeAvailability.dailyAvailableHours} hours (${user.timeAvailability.dailyAvailableHours * 60} minutes) per day
-- EVERY day (1-7) of EVERY week must have tasks
-- Total task time per day should use 80-100% of available time
-- Example: If user has 2 hours/day, each day needs tasks totaling 90-120 minutes
+- EVERY day (1-7) of EVERY week must contain tasks
+- Total task time per day must use 80-100% of available time
+- If a user has 2 hours/day, each day should contain tasks totaling roughly 90-120 minutes
+- If total time is not fully consumed by one task, the remaining time MUST be filled with additional tasks
 
 TASK DESCRIPTIONS MUST BE DETAILED:
 Each task description should include:
-- Exactly WHAT to do (step-by-step if needed)
-- HOW to do it (specific method, tool, or approach)
+- Exactly WHAT to do (Be written in clear, natural paragraph form)
+- naturally clearly explain what to do, how to do it, tools/resources, expected outcome, and common mistakes
 - WHERE to find resources (websites, apps, books if applicable)
 - EXPECTED OUTCOME (what success looks like)
 - COMMON MISTAKES to avoid
+- Sound like a mentor guiding the user, NOT a numbered tutorial
+
+STRICTLY FORBIDDEN IN DESCRIPTIONS:
+- Numbered steps (Step 1, Step 2, etc.)
+- Bullet points or lists
+- Short or vague sentences
+
 
 Example of a GOOD detailed task:
 {
     "title": "Complete Python Basics Tutorial - Variables & Data Types",
-    "description": "Step 1: Go to codecademy.com or freecodecamp.org and navigate to Python basics course. Step 2: Complete the 'Variables and Data Types' module. Step 3: Practice by creating a file called 'practice.py' and declare 5 different variables (string, int, float, bool, list). Step 4: Print each variable with its type using type() function. Expected outcome: You should be able to create variables of any type without looking at documentation. Common mistake: Don't forget that Python is case-sensitive - 'Name' and 'name' are different variables.",
+    "description": "Spend this session learning Python variables and data types using a beginner-friendly platform such as Codecademy or freeCodeCamp, focusing on how different data types are defined and used in real code. Apply what you learn by creating a simple practice.py file and experimenting with declaring variables of different types, including strings, integers, floats, booleans, and lists, then printing each variable along with its type to reinforce understanding. By the end of this task, you should feel comfortable creating and identifying Python variables without needing to constantly check documentation. Be careful with naming conventions, as Python is case-sensitive and variables like Name and name are treated as completely different identifiers.",
     "estimatedMinutes": 45,
     ...
 }
@@ -482,14 +491,14 @@ Example of a BAD task (too vague - DO NOT DO THIS):
 }
 
 TASK DISTRIBUTION PER DAY:
-- Each weekNumber + dayOfWeek combination must have multiple tasks if individual tasks are short
-- For ${user.timeAvailability.dailyAvailableHours} hours/day: aim for ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 30)} to ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 45)} tasks per day
-- Tasks can range from 15 to 90 minutes each
-- Larger tasks (60-90 min) can be standalone, smaller tasks must be grouped
+- Each weekNumber + dayOfWeek combination MUST include multiple tasks if individual tasks are shorter than 60 minutes
+- For ${user.timeAvailability.dailyAvailableHours} hours/day, aim for ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 30)} to ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 45)} tasks per day
+- Tasks must range between 15 and 90 minutes
+- Larger tasks (60-90 minutes) may stand alone ONLY if they nearly fill the daily time
 
 TIPS FIELD:
 - Every task MUST have a "tips" field
-- Include practical advice, shortcuts, or motivation
+- Tips must provide practical advice, shortcuts, motivation
 - Reference specific resources when helpful
 
 CRITICAL: Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON structure.`;
