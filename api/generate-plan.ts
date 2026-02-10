@@ -232,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ],
             response_format: { type: 'json_object' },
             temperature: 0.7,
-            max_tokens: 32000,
+            max_tokens: 16384,
         });
 
         const content = completion.choices[0]?.message?.content;
