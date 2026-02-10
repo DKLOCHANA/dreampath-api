@@ -232,7 +232,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             ],
             response_format: { type: 'json_object' },
             temperature: 0.7,
-            max_tokens: 16000,
+            max_tokens: 32000,
         });
 
         const content = completion.choices[0]?.message?.content;
@@ -240,6 +240,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!content) {
             throw new Error('No response from ChatGPT');
         }
+
+        // ═══════════════════════════════════════════════════════════════
+        // DEBUG: Log raw GPT response
+        // ═══════════════════════════════════════════════════════════════
+        console.log('\n═══════════════════════════════════════════════════════════════');
+        console.log('[generate-plan] RAW GPT RESPONSE:');
+        console.log('═══════════════════════════════════════════════════════════════');
+        console.log(content);
+        console.log('═══════════════════════════════════════════════════════════════\n');
 
         // ═══════════════════════════════════════════════════════════════
         // PARSE & VALIDATE RESPONSE
