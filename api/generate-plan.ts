@@ -245,7 +245,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // PARSE & VALIDATE RESPONSE
         // ═══════════════════════════════════════════════════════════════
         
-        const plan = parseAndValidateResponse(content);
+        const dailyMinutes = body.user.timeAvailability.dailyAvailableHours * 60;
+        const plan = parseAndValidateResponse(content, weeksUntilTarget, dailyMinutes);
 
         // ═══════════════════════════════════════════════════════════════
         // RETURN SUCCESS RESPONSE
@@ -308,19 +309,44 @@ function buildComprehensivePrompt(
 ): string {
     const { goal, user } = body;
     
+    // ═══════════════════════════════════════════════════════════════
+    // DYNAMIC CALCULATIONS - Never hardcode these values
+    // ═══════════════════════════════════════════════════════════════
+    
     // Determine number of milestones based on timeline
     const numMilestones = Math.min(Math.max(weeksUntilTarget, 3), 8);
     
+    // Daily time in minutes
+    const dailyMinutes = user.timeAvailability.dailyAvailableHours * 60;
+    
+    // Minimum tasks calculation: at least 2 per day
+    const minimumTotalTasks = daysUntilTarget * 2;
+    
+    // Average task duration (aim for 30-45 min tasks to ensure variety)
+    const avgTaskDuration = 40;
+    const tasksPerDay = Math.max(2, Math.ceil(dailyMinutes / avgTaskDuration));
+    
+    // Total tasks needed to fill all days properly
+    const idealTotalTasks = daysUntilTarget * tasksPerDay;
+    
+    // Build the explicit day grid for all weeks
+    const dayGrid = buildDayGrid(weeksUntilTarget, dailyMinutes, tasksPerDay);
+    
     // Calculate experience multiplier for task difficulty
     const experienceMultiplier = {
-        'beginner': 'Start with fundamentals, include more learning tasks, break complex activities into smaller steps',
-        'intermediate': 'Balance learning with practice, include moderate challenges, build on existing knowledge',
-        'advanced': 'Focus on optimization and mastery, include stretch goals, emphasize efficiency',
+        'beginner': 'Start with fundamentals, include more learning tasks, break complex activities into smaller steps. Tasks should be simple, well-explained, and confidence-building.',
+        'intermediate': 'Balance learning with practice, include moderate challenges, build on existing knowledge. Tasks can assume basic understanding.',
+        'advanced': 'Focus on optimization and mastery, include stretch goals, emphasize efficiency. Tasks should challenge and push boundaries.',
     }[user.skills?.experienceLevel || 'beginner'];
+
+    // Occupation-aware task suggestions
+    const occupationContext = user.profile?.occupation 
+        ? `Consider that the user works as a ${user.profile.occupation}. Schedule demanding tasks for when they likely have more energy (weekends or evenings). Leverage any transferable skills from their profession.`
+        : 'No occupation specified - assume flexible schedule but respect daily time limits.';
 
     // Build challenges section
     const challengesSection = user.challenges?.selected?.length 
-        ? `Known Challenges: ${user.challenges.selected.join(', ')}${user.challenges.custom ? `, ${user.challenges.custom}` : ''}`
+        ? `Known Challenges: ${user.challenges.selected.join(', ')}${user.challenges.custom ? `, ${user.challenges.custom}` : ''}\nIMPORTANT: Each challenge must be addressed in at least one task's tips or description.`
         : 'No specific challenges mentioned';
 
     // Build skills section
@@ -328,7 +354,17 @@ function buildComprehensivePrompt(
         ? `Existing Skills: ${user.skills.existingSkills.join(', ')}`
         : 'No specific skills mentioned';
 
-    return `Create a comprehensive, personalized action plan for achieving this goal.
+    return `You are creating a DAY-BY-DAY action plan. Your PRIMARY goal is to ensure EVERY SINGLE DAY has tasks that fill the user's available time.
+
+═══════════════════════════════════════════════════════════════
+🎯 CRITICAL TIME REQUIREMENTS - READ FIRST
+═══════════════════════════════════════════════════════════════
+• Total days in plan: ${daysUntilTarget} days
+• Total weeks in plan: ${weeksUntilTarget} weeks
+• User's daily time: ${dailyMinutes} minutes (${user.timeAvailability.dailyAvailableHours} hours)
+• MINIMUM tasks required: ${minimumTotalTasks} tasks (at least 2 per day)
+• IDEAL tasks to generate: ${idealTotalTasks} tasks (~${tasksPerDay} per day)
+• Each day's tasks MUST sum to ${Math.floor(dailyMinutes * 0.8)}-${dailyMinutes} minutes
 
 ═══════════════════════════════════════════════════════════════
 GOAL INFORMATION
@@ -339,176 +375,168 @@ Category: ${goal.category}
 Priority: ${goal.priority}
 Start Date: ${goal.startDate || new Date().toISOString().split('T')[0]}
 Target Date: ${goal.targetDate}
-Timeline: ${daysUntilTarget} days (${weeksUntilTarget} weeks)
 
 ═══════════════════════════════════════════════════════════════
-USER PROFILE
+USER CONTEXT (Use this to personalize tasks)
 ═══════════════════════════════════════════════════════════════
 ${user.displayName ? `Name: ${user.displayName}` : ''}
 ${user.profile?.age ? `Age: ${user.profile.age}` : ''}
 ${user.profile?.occupation ? `Occupation: ${user.profile.occupation}` : ''}
-${user.profile?.educationLevel ? `Education: ${user.profile.educationLevel}` : ''}
+${occupationContext}
 
-═══════════════════════════════════════════════════════════════
-TIME AVAILABILITY
-═══════════════════════════════════════════════════════════════
-Daily Hours Available: ${user.timeAvailability.dailyAvailableHours} hours
-${user.timeAvailability.preferredTimeSlots?.length ? `Preferred Times: ${user.timeAvailability.preferredTimeSlots.join(', ')}` : ''}
-${user.timeAvailability.busyDays?.length ? `Busy Days: ${user.timeAvailability.busyDays.join(', ')}` : ''}
-Weekly Commitment Capacity: ${user.timeAvailability.dailyAvailableHours * 7} hours maximum
-
-═══════════════════════════════════════════════════════════════
-FINANCIAL CONTEXT
-═══════════════════════════════════════════════════════════════
-${user.finances?.monthlyBudget ? `Monthly Budget: ${user.finances.currency || '$'}${user.finances.monthlyBudget}` : 'Budget: Flexible / Not specified'}
-
-═══════════════════════════════════════════════════════════════
-EXPERIENCE & SKILLS
-═══════════════════════════════════════════════════════════════
-Experience Level: ${user.skills?.experienceLevel || 'beginner'} 
-Strategy: ${experienceMultiplier}
+Experience Level: ${user.skills?.experienceLevel || 'beginner'}
+${experienceMultiplier}
 ${skillsSection}
-${user.skills?.learningInterests?.length ? `Interested in Learning: ${user.skills.learningInterests.join(', ')}` : ''}
+
+${challengesSection}
+
+${user.finances?.monthlyBudget ? `Budget Constraint: Keep costs under ${user.finances.currency || '$'}${user.finances.monthlyBudget}/month` : 'Budget: Prefer free/low-cost resources'}
 
 ═══════════════════════════════════════════════════════════════
-CHALLENGES & OBSTACLES
+📅 MANDATORY DAY-BY-DAY COVERAGE
 ═══════════════════════════════════════════════════════════════
-${challengesSection}
+You MUST create tasks for EVERY day listed below. No exceptions.
+
+${dayGrid}
 
 ═══════════════════════════════════════════════════════════════
 REQUIRED JSON OUTPUT SCHEMA
 ═══════════════════════════════════════════════════════════════
 {
-    "planSummary": "2-3 sentence strategic overview of the approach",
+    "planSummary": "2-3 sentence strategic overview",
     "goalTitle": "Refined, action-oriented title",
-    "goalDescription": "Clear description of the end state",
-    "difficultyScore": <1-10 based on user context>,
-    "difficultyExplanation": "Why this difficulty level given user's situation",
+    "goalDescription": "Clear description of success",
+    "difficultyScore": <1-10>,
+    "difficultyExplanation": "Why this score for this user",
     "totalWeeks": ${weeksUntilTarget},
-    "weeklyHoursRequired": <realistic hours needed per week, max ${user.timeAvailability.dailyAvailableHours * 7}>,
-    "successProbability": <0.5-0.95 based on realistic assessment>,
+    "weeklyHoursRequired": <max ${user.timeAvailability.dailyAvailableHours * 7}>,
+    "successProbability": <0.5-0.95>,
     "keySuccessFactors": ["factor1", "factor2", "factor3"],
     "milestones": [
         {
             "order": 1,
-            "title": "Action-oriented milestone title",
+            "title": "Milestone title",
             "description": "What will be accomplished",
             "targetDate": "YYYY-MM-DD",
             "weekNumber": 1,
-            "keyActivities": ["activity1", "activity2", "activity3"],
+            "keyActivities": ["activity1", "activity2"],
             "tasks": [
                 {
-                    "title": "Specific, actionable task title (max 60 chars)",
-                    "description": "DETAILED description with: 1) Exact steps to follow 2) Resources/tools to use 3) Expected outcome 4) Tips to avoid common mistakes. Minimum 100 words.",
-                    "estimatedMinutes": <15-90, multiple tasks should fill daily ${user.timeAvailability.dailyAvailableHours * 60} minutes>,
+                    "title": "Task title (max 60 chars)",
+                    "description": "Detailed paragraph (100+ words): what to do, how, resources, outcome, mistakes to avoid",
+                    "estimatedMinutes": <15-90>,
                     "priority": "HIGH|MEDIUM|LOW",
                     "difficulty": "EASY|MEDIUM|HARD",
                     "category": "LEARNING|ACTION|PLANNING|REVIEW|PRACTICE|NETWORKING",
-                    "dayOfWeek": <1-7, Monday=1, EVERY day must have tasks>,
-                    "weekNumber": 1,
-                    "tips": "Practical advice, shortcuts, or motivation (REQUIRED)"
+                    "dayOfWeek": <1-7>,
+                    "weekNumber": <1-${weeksUntilTarget}>,
+                    "tips": "Practical advice (REQUIRED)"
                 }
             ]
         }
     ],
-    "risks": [
-        {
-            "risk": "Potential obstacle",
-            "likelihood": "LOW|MEDIUM|HIGH",
-            "mitigation": "How to prevent or handle it"
-        }
-    ],
+    "risks": [{"risk": "...", "likelihood": "LOW|MEDIUM|HIGH", "mitigation": "..."}],
     "resourceRequirements": {
-        "timeInvestment": "X hours per week",
-        "financialInvestment": "$X - $Y or 'None required'",
-        "toolsNeeded": ["tool1", "tool2"],
-        "skillsToDevelop": ["skill1", "skill2"]
+        "timeInvestment": "X hours/week",
+        "financialInvestment": "...",
+        "toolsNeeded": [],
+        "skillsToDevelop": []
     },
-    "quickWins": [
-        "Something achievable in first 3 days",
-        "Another quick win to build momentum"
-    ],
-    "motivationalMessage": "Personalized encouragement based on user's goal and challenges"
+    "quickWins": ["Quick win 1", "Quick win 2"],
+    "motivationalMessage": "Personalized encouragement"
 }
 
 ═══════════════════════════════════════════════════════════════
-GENERATION RULES
+⚠️ STRICT RULES - MUST FOLLOW
 ═══════════════════════════════════════════════════════════════
-1. Create exactly ${numMilestones} milestones spread across ${weeksUntilTarget} weeks
-2. EVERY SINGLE DAY must have tasks - no empty days allowed
-3. Each day MUST contain enough tasks to fill approximately ${user.timeAvailability.dailyAvailableHours * 60} minutes (${user.timeAvailability.dailyAvailableHours} hours)
-4. Each day MUST include at least TWO tasks unless a single task uses 90-100% of the daily available time
-5. Calculate total daily minutes = ${user.timeAvailability.dailyAvailableHours * 60}. The sum of all task estimatedMinutes per day must fall between 80-100% of this value
-6. No single task may exceed 50% of the daily available time unless it is the only task for that day
-7. Start with easier tasks in week 1 and gradually increase difficulty over time
-8. Include variety each day: mix learning, practice, planning, and action tasks
-9. Address user challenges with explicit mitigation strategies inside tasks or tips
-10. ${user.finances?.monthlyBudget ? `Keep financial recommendations under $${user.finances.monthlyBudget}/month` : 'Prioritize free or low-cost resources'}
-11. Task difficulty must align with the user's "${user.skills?.experienceLevel || 'beginner'}" level
-12. Include 2-3 quick wins achievable within the first week
-13. Each milestone target date must be a real date between today and ${targetDate.toISOString().split('T')[0]}
-14. Motivational message must reference the user's specific goal and challenges
 
-═══════════════════════════════════════════════════════════════
-CRITICAL TASK REQUIREMENTS
-═══════════════════════════════════════════════════════════════
-DAILY COVERAGE:
-- User has ${user.timeAvailability.dailyAvailableHours} hours (${user.timeAvailability.dailyAvailableHours * 60} minutes) per day
-- EVERY day (1-7) of EVERY week must contain tasks
-- Total task time per day must use 80-100% of available time
-- If a user has 2 hours/day, each day should contain tasks totaling roughly 90-120 minutes
-- If total time is not fully consumed by one task, the remaining time MUST be filled with additional tasks
+RULE 1: DAILY TASK MINIMUM
+• EVERY day (Week 1 Day 1 through Week ${weeksUntilTarget} Day 7) MUST have tasks
+• Each day MUST have AT LEAST 2 tasks
+• Exception: A single task is allowed ONLY if it's ${Math.floor(dailyMinutes * 0.8)}+ minutes (fills 80%+ of daily time)
 
-TASK DESCRIPTIONS MUST BE DETAILED:
-Each task description should include:
-- Exactly WHAT to do (Be written in clear, natural paragraph form)
-- naturally clearly explain what to do, how to do it, tools/resources, expected outcome, and common mistakes
-- WHERE to find resources (websites, apps, books if applicable)
-- EXPECTED OUTCOME (what success looks like)
+RULE 2: TIME ALIGNMENT
+• User has exactly ${dailyMinutes} minutes per day - RESPECT THIS
+• Sum of task durations per day: ${Math.floor(dailyMinutes * 0.8)}-${dailyMinutes} minutes
+• Individual task duration: 15-90 minutes
+• Never exceed user's daily time allocation
+
+RULE 3: REALISTIC PROGRESSION
+• Week 1: Focus on setup, learning basics, and quick wins (easier tasks)
+• Middle weeks: Build momentum with practice and action tasks
+• Final week(s): Focus on completion, polish, and review
+• Difficulty should match user's "${user.skills?.experienceLevel || 'beginner'}" level
+
+RULE 4: TASK VARIETY
+• Mix categories each day: LEARNING, ACTION, PRACTICE, REVIEW
+• Don't repeat the same task title
+• Progress logically (don't assign advanced tasks before basics)
+
+RULE 5: QUALITY DESCRIPTIONS
+Each task description must be a detailed paragraph (100+ words) containing:
+- WHAT to do specifically
+- HOW to do it (methods, approach)
+- RESOURCES to use (websites, tools, apps)
+- SUCCESS criteria (how to know it's done)
 - COMMON MISTAKES to avoid
-- Sound like a mentor guiding the user, NOT a numbered tutorial
 
-STRICTLY FORBIDDEN IN DESCRIPTIONS:
-- Numbered steps (Step 1, Step 2, etc.)
+FORBIDDEN in descriptions:
+- Numbered steps (Step 1, Step 2)  
 - Bullet points or lists
-- Short or vague sentences
+- Vague phrases like "learn the basics"
 
+═══════════════════════════════════════════════════════════════
+✅ EXAMPLE OF CORRECT DAILY DISTRIBUTION
+═══════════════════════════════════════════════════════════════
+If user has ${dailyMinutes} minutes/day, a valid day might look like:
 
-Example of a GOOD detailed task:
-{
-    "title": "Complete Python Basics Tutorial - Variables & Data Types",
-    "description": "Spend this session learning Python variables and data types using a beginner-friendly platform such as Codecademy or freeCodeCamp, focusing on how different data types are defined and used in real code. Apply what you learn by creating a simple practice.py file and experimenting with declaring variables of different types, including strings, integers, floats, booleans, and lists, then printing each variable along with its type to reinforce understanding. By the end of this task, you should feel comfortable creating and identifying Python variables without needing to constantly check documentation. Be careful with naming conventions, as Python is case-sensitive and variables like Name and name are treated as completely different identifiers.",
-    "estimatedMinutes": 45,
-    ...
+Day example (${dailyMinutes} min available):
+- Task 1: ${Math.floor(dailyMinutes * 0.4)} minutes
+- Task 2: ${Math.floor(dailyMinutes * 0.35)} minutes  
+- Task 3: ${Math.floor(dailyMinutes * 0.25)} minutes
+Total: ${dailyMinutes} minutes ✓
+
+OR if high difficulty task:
+- Task 1: ${Math.floor(dailyMinutes * 0.85)} minutes (single intensive task)
+Total: ${Math.floor(dailyMinutes * 0.85)} minutes ✓
+
+═══════════════════════════════════════════════════════════════
+🚨 FINAL CHECKLIST BEFORE RESPONDING
+═══════════════════════════════════════════════════════════════
+□ Did I create tasks for ALL ${daysUntilTarget} days?
+□ Does EVERY day have at least 2 tasks (or 1 task of ${Math.floor(dailyMinutes * 0.8)}+ min)?
+□ Do daily task totals equal ${Math.floor(dailyMinutes * 0.8)}-${dailyMinutes} minutes?
+□ Are tasks appropriate for "${user.skills?.experienceLevel || 'beginner'}" level?
+□ Did I include the required "tips" field on every task?
+□ Are week 1 tasks easier than later weeks?
+□ Is every task description 100+ words with no bullet points?
+
+Return ONLY valid JSON. No markdown, no explanations.`;
 }
 
-Example of a BAD task (too vague - DO NOT DO THIS):
-{
-    "title": "Learn Python basics",
-    "description": "Study Python fundamentals",
-    "estimatedMinutes": 30,
-    ...
-}
+// ═══════════════════════════════════════════════════════════════
+// DAY GRID BUILDER - Creates explicit day-by-day requirement list
+// ═══════════════════════════════════════════════════════════════
 
-TASK DISTRIBUTION PER DAY:
-- Each weekNumber + dayOfWeek combination MUST include multiple tasks if individual tasks are shorter than 60 minutes
-- For ${user.timeAvailability.dailyAvailableHours} hours/day, aim for ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 30)} to ${Math.ceil((user.timeAvailability.dailyAvailableHours * 60) / 45)} tasks per day
-- Tasks must range between 15 and 90 minutes
-- Larger tasks (60-90 minutes) may stand alone ONLY if they nearly fill the daily time
-
-TIPS FIELD:
-- Every task MUST have a "tips" field
-- Tips must provide practical advice, shortcuts, motivation
-- Reference specific resources when helpful
-
-CRITICAL: Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON structure.`;
+function buildDayGrid(weeksUntilTarget: number, dailyMinutes: number, tasksPerDay: number): string {
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    let grid = '';
+    
+    for (let week = 1; week <= weeksUntilTarget; week++) {
+        grid += `\nWEEK ${week}:\n`;
+        for (let day = 1; day <= 7; day++) {
+            grid += `  • ${dayNames[day - 1]} (Week ${week}, Day ${day}): Need ${tasksPerDay}+ tasks totaling ~${dailyMinutes} min\n`;
+        }
+    }
+    
+    return grid;
 }
 
 // ═══════════════════════════════════════════════════════════════
 // RESPONSE PARSER & VALIDATOR
 // ═══════════════════════════════════════════════════════════════
 
-function parseAndValidateResponse(content: string): GeneratedPlan {
+function parseAndValidateResponse(content: string, weeksUntilTarget?: number, dailyMinutes?: number): GeneratedPlan {
     // Clean the response
     let cleaned = content.trim();
 
@@ -535,6 +563,61 @@ function parseAndValidateResponse(content: string): GeneratedPlan {
     for (const milestone of parsed.milestones) {
         if (!Array.isArray(milestone.tasks) || milestone.tasks.length === 0) {
             throw new Error(`Milestone "${milestone.title}" has no tasks`);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DAILY COVERAGE VALIDATION
+    // ═══════════════════════════════════════════════════════════════
+    if (weeksUntilTarget && dailyMinutes) {
+        // Collect all tasks and group by week+day
+        const tasksByDay: Map<string, GeneratedTask[]> = new Map();
+        
+        for (const milestone of parsed.milestones) {
+            for (const task of milestone.tasks) {
+                const key = `W${task.weekNumber}D${task.dayOfWeek}`;
+                if (!tasksByDay.has(key)) {
+                    tasksByDay.set(key, []);
+                }
+                tasksByDay.get(key)!.push(task);
+            }
+        }
+
+        // Check coverage for each day
+        const warnings: string[] = [];
+        let totalTasks = 0;
+        
+        for (let week = 1; week <= weeksUntilTarget; week++) {
+            for (let day = 1; day <= 7; day++) {
+                const key = `W${week}D${day}`;
+                const dayTasks = tasksByDay.get(key) || [];
+                totalTasks += dayTasks.length;
+                
+                if (dayTasks.length === 0) {
+                    warnings.push(`Week ${week} Day ${day}: No tasks`);
+                } else if (dayTasks.length === 1) {
+                    // Single task must be at least 80% of daily time
+                    const taskMinutes = dayTasks[0].estimatedMinutes;
+                    const minRequired = Math.floor(dailyMinutes * 0.8);
+                    if (taskMinutes < minRequired) {
+                        warnings.push(`Week ${week} Day ${day}: Single task (${taskMinutes}min) below ${minRequired}min threshold`);
+                    }
+                }
+                
+                // Check total daily time
+                const dailyTotal = dayTasks.reduce((sum, t) => sum + t.estimatedMinutes, 0);
+                const minDailyTime = Math.floor(dailyMinutes * 0.7); // Allow 70% minimum
+                
+                if (dayTasks.length > 0 && dailyTotal < minDailyTime) {
+                    warnings.push(`Week ${week} Day ${day}: Total time ${dailyTotal}min < ${minDailyTime}min minimum`);
+                }
+            }
+        }
+
+        // Log warnings but don't fail (GPT output may vary)
+        if (warnings.length > 0) {
+            console.warn('[generate-plan] Daily coverage warnings:', warnings.slice(0, 5));
+            console.warn(`[generate-plan] Total tasks generated: ${totalTasks}`);
         }
     }
 
