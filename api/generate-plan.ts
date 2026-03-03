@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI from 'openai';
+import { checkMultipleContent, getBlockedResponse } from './utils/contentFilter';
 
 // Initialize OpenAI client
 const openai = new OpenAI({
@@ -196,6 +197,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             return res.status(400).json({ 
                 error: 'Missing required field: user.timeAvailability.dailyAvailableHours' 
             });
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // CONTENT SAFETY CHECK
+        // ═══════════════════════════════════════════════════════════════
+        
+        const filterResult = checkMultipleContent([
+            body.goal.title,
+            body.goal.description
+        ]);
+        
+        if (filterResult.blocked) {
+            console.log('[generate-plan] Blocked harmful content:', body.goal.title);
+            return res.status(200).json(getBlockedResponse(filterResult));
         }
 
         // Calculate timeline
